@@ -80,11 +80,15 @@
 
     function getFastApiCandidates() {
       const preferred = getApiBase();
-      const set = new Set([
-        preferred,
-        'http://localhost:8000',
-        'http://127.0.0.1:8000'
-      ]);
+      let preferredHost = '';
+      try {
+        preferredHost = new URL(preferred).hostname;
+      } catch (e) {}
+      const isLocalPreferred = preferredHost === 'localhost' || preferredHost === '127.0.0.1';
+      if (!isLocalPreferred && preferred) {
+        return [String(preferred).replace(/\/$/, '')];
+      }
+      const set = new Set([preferred, 'http://localhost:8000', 'http://127.0.0.1:8000']);
       return Array.from(set).filter(Boolean).map(v => String(v).replace(/\/$/, ''));
     }
 
@@ -352,9 +356,27 @@
       const runUploads = runSessionIds
         .map(id => ({ id, data: currentRunSessionAnalytics[id] }))
         .filter(x => !!x.data);
-      if (runSessionIds.length > 0 && runUploads.length === runSessionIds.length) {
+      if (runUploads.length > 0) {
+        const byId = new Map(runUploads.map(x => [x.id, x.data]));
         let prevRisk = null;
-        const perSession = runUploads.map(({ id, data }) => {
+        const perSession = runSessionIds.map((id) => {
+          const data = byId.get(id);
+          if (!data) {
+            const local = localHeuristicAnalysis(
+              analysisTranscripts.find(t => Number(t.session) === id)?.text || ''
+            );
+            const risk = soberizeScore(local.risk, 0.28);
+            return {
+              session: id,
+              emo: local.emo,
+              cog: local.cog,
+              hes: local.hes,
+              lin: local.lin,
+              csi: clampScore(100 - risk),
+              risk,
+              insight: `Session ${id}: partial upload fallback (local estimate).`
+            };
+          }
           const csiRaw = clampScore(data?.csi?.csi_score ?? data?.user_latest_csi_score ?? 50);
           const driftRaw = Number(data?.drift?.overall_drift_score ?? 0);
           const driftNorm = clampScore(Math.round((Math.max(0, Math.min(3.5, driftRaw)) / 3.5) * 100));
@@ -387,7 +409,13 @@
           };
         });
         setBackendStatus('online', 'Backend: online (current run)', 'Using current-run session analytics');
-        return buildAnalysisFromParsedSessions(perSession, analysisTranscripts, 'Current-run backend analysis');
+        return buildAnalysisFromParsedSessions(
+          perSession,
+          analysisTranscripts,
+          runUploads.length === runSessionIds.length
+            ? 'Current-run backend analysis'
+            : 'Current-run mixed analysis'
+        );
       }
 
       const userId = getCurrentUserId();
@@ -835,7 +863,10 @@
           fd.append('user_id', String(userId));
           fd.append('transcript', transcriptText || '');
 
-          const resp = await fetch(endpoint, { method: 'POST', body: fd });
+          const ctrl = new AbortController();
+          const timeout = setTimeout(() => ctrl.abort(), 25000);
+          const resp = await fetch(endpoint, { method: 'POST', body: fd, signal: ctrl.signal });
+          clearTimeout(timeout);
           const jd = await resp.json().catch(() => ({}));
           if (!resp.ok) throw new Error(jd.detail || jd.error || `HTTP ${resp.status}`);
           backendStatusBase = base;
@@ -847,11 +878,11 @@
       }
 
       console.warn('Session upload to FastAPI /api/upload failed:', lastErr);
-      setBackendStatus('checking', 'Backend: upload retry', 'Session upload failed; health check will continue');
+      // Keep current status; periodic health checks will reconcile connectivity.
       return { skipped: true, error: (lastErr && lastErr.message) || 'Upload failed' };
     }
 
-    async function waitForPendingSessionUploads(maxMs = 45000) {
+    async function waitForPendingSessionUploads(maxMs = 25000) {
       const jobs = Object.values(pendingTranscriptions);
       if (!jobs.length) return;
       await Promise.race([
