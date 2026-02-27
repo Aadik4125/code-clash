@@ -13,8 +13,10 @@ BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-from config import CORS_ORIGINS, FASTAPI_PORT
-from database import create_tables
+from config import CORS_ORIGINS, DATABASE_URL, FASTAPI_PORT
+from database import SessionLocal, create_tables
+from models.session import Session
+from models.user import User
 
 # Import routes
 from routes.audio import router as audio_router
@@ -64,7 +66,28 @@ app.include_router(dashboard_router, prefix='/api', tags=['Dashboard'])
 
 @app.get('/api/health')
 def health_check():
-    return {'status': 'ok', 'service': 'cognivara-backend'}
+    db_kind = 'postgres' if DATABASE_URL.startswith('postgresql+') else 'sqlite'
+    users = None
+    sessions = None
+    try:
+        db = SessionLocal()
+        users = db.query(User).count()
+        sessions = db.query(Session).count()
+    except Exception:
+        pass
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+    return {
+        'status': 'ok',
+        'service': 'cognivara-backend',
+        'database': db_kind,
+        'users': users,
+        'sessions': sessions,
+    }
 
 
 @app.get('/')

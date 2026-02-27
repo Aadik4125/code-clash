@@ -10,11 +10,15 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # ── Database ──────────────────────────────────────────────
-# Default: SQLite (zero setup). Set DATABASE_URL in .env for PostgreSQL.
-DATABASE_URL = os.getenv(
-    'DATABASE_URL',
-    'sqlite:///' + os.path.join(os.path.dirname(__file__), 'cognivara.db')
-)
+# Default: SQLite locally, but require DATABASE_URL on Render to avoid silent fallback.
+_database_url = os.getenv('DATABASE_URL', '').strip()
+if _database_url:
+    DATABASE_URL = _database_url
+else:
+    if os.getenv('RENDER') == 'true':
+        raise RuntimeError('DATABASE_URL is required on Render. Connect your Postgres instance.')
+    DATABASE_URL = 'sqlite:///' + os.path.join(os.path.dirname(__file__), 'cognivara.db')
+
 if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql+psycopg://', 1)
 elif DATABASE_URL.startswith('postgresql://'):
