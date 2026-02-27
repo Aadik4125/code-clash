@@ -69,6 +69,7 @@ def health_check():
     db_kind = 'postgres' if DATABASE_URL.startswith('postgresql+') else 'sqlite'
     users = None
     sessions = None
+    db = None
     try:
         db = SessionLocal()
         users = db.query(User).count()
@@ -77,7 +78,8 @@ def health_check():
         pass
     finally:
         try:
-            db.close()
+            if db is not None:
+                db.close()
         except Exception:
             pass
 

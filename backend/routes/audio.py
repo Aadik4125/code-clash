@@ -32,7 +32,6 @@ def _hash_password(password: str) -> str:
     digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 200_000)
     return f'pbkdf2_sha256${salt.hex()}${digest.hex()}'
 
-
 @router.post('/user')
 def create_or_update_user(
     name: str = Form(...),
