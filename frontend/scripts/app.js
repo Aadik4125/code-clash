@@ -61,6 +61,7 @@
     let currentComparePatient = 'A';
     let backendStatusBase = null;
     let backendStatusBusy = false;
+    let backendProbeFailures = 0;
 
     function getApiBase() {
       if (window.COGNIVARA_API_BASE && String(window.COGNIVARA_API_BASE).trim()) {
@@ -122,7 +123,7 @@
     async function probeBackend(base) {
       try {
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 2500);
+        const t = setTimeout(() => ctrl.abort(), 10000);
         const resp = await fetch(`${base}/api/health`, { method: 'GET', signal: ctrl.signal });
         clearTimeout(t);
         return resp.ok;
@@ -139,15 +140,27 @@
         setBackendStatus('checking', 'Backend: checking', 'Checking backend connectivity');
       }
       try {
+        const candidates = [];
+        if (backendStatusBase) candidates.push(backendStatusBase);
         for (const base of getApiCandidates()) {
+          if (!candidates.includes(base)) candidates.push(base);
+        }
+
+        for (const base of candidates) {
           const ok = await probeBackend(base);
           if (ok) {
+            backendProbeFailures = 0;
             backendStatusBase = base;
             setBackendStatus('online', `Backend: online (${backendHostLabel(base)})`, `Connected to ${base}`);
             return true;
           }
         }
-        setBackendStatus('offline', 'Backend: offline', 'FastAPI backend is not reachable');
+        backendProbeFailures += 1;
+        if (backendProbeFailures >= 3 || force) {
+          setBackendStatus('offline', 'Backend: offline', 'FastAPI backend is not reachable');
+        } else {
+          setBackendStatus('checking', 'Backend: checking', 'Backend response delayed; retrying');
+        }
         return false;
       } finally {
         backendStatusBusy = false;
