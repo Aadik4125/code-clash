@@ -698,6 +698,16 @@
     let mediaMimeType = 'audio/webm';
     let pendingTranscriptions = {};
     const USE_BROWSER_SPEECH_RECOGNITION = false;
+    const RECORDING_QUESTIONS = [
+      'How was your day?',
+      'What was the last thing you did that got you in trouble?',
+      'What are your thoughts on your fav music artist?'
+    ];
+
+    function getRecordingQuestion(step) {
+      const idx = Number(step) - 1;
+      return RECORDING_QUESTIONS[idx] || RECORDING_QUESTIONS[RECORDING_QUESTIONS.length - 1];
+    }
 
     function releaseMicrophone() {
       try {
@@ -930,7 +940,7 @@
       document.getElementById('timer').style.letterSpacing = '';
       document.getElementById('progress-bar').style.width = '0%';
       document.getElementById('record-label').textContent = 'Tap to Record';
-      document.getElementById('timer-label').textContent = 'Speak naturally — describe your day';
+      document.getElementById('timer-label').textContent = getRecordingQuestion(1);
       document.getElementById('baseline-established').classList.remove('show');
       document.getElementById('session-transcript-card').classList.remove('show');
       document.getElementById('redo-btn').classList.remove('show');
@@ -980,6 +990,7 @@
       document.getElementById('record-label').classList.add('on');
       document.getElementById('timer').classList.add('active');
       document.getElementById(`step-${currentStep}`).classList.add('active');
+      document.getElementById('timer-label').textContent = getRecordingQuestion(currentStep);
 
       // Optional browser speech recognition is disabled by default to avoid repeated permission prompts.
       if (USE_BROWSER_SPEECH_RECOGNITION) {
@@ -1153,7 +1164,7 @@
         document.getElementById('timer').textContent = '0:30';
         document.getElementById('progress-bar').style.width = '0%';
         document.getElementById('record-label').textContent = 'Tap to Record';
-        document.getElementById('timer-label').textContent = `Recording ${currentStep} of 3 — Describe a recent memory`;
+        document.getElementById('timer-label').textContent = getRecordingQuestion(currentStep);
       } else {
         document.getElementById('progress-bar').style.width = '100%';
         document.getElementById('timer').textContent = '✓';
@@ -1238,7 +1249,7 @@
       document.getElementById('timer').style.letterSpacing = '';
       document.getElementById('progress-bar').style.width = '0%';
       document.getElementById('record-label').textContent = 'Tap to Record';
-      document.getElementById('timer-label').textContent = `Re-recording session ${currentStep} — speak naturally`;
+      document.getElementById('timer-label').textContent = getRecordingQuestion(currentStep);
       // Hide redo button and session transcript card
       document.getElementById('redo-btn').classList.remove('show');
       document.getElementById('session-transcript-card').classList.remove('show');
