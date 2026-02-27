@@ -134,6 +134,22 @@
 
     async function refreshBackendStatus(force = false) {
       if (backendStatusBusy && !force) return false;
+      // Avoid false "offline" while long-running upload/analysis requests are active.
+      const hasActiveWork = (
+        (typeof isRecording !== 'undefined' && isRecording) ||
+        (typeof pendingTranscriptions !== 'undefined' && Object.keys(pendingTranscriptions).length > 0)
+      );
+      if (!force && hasActiveWork) {
+        if (backendStatusBase) {
+          setBackendStatus(
+            'online',
+            `Backend: online (${backendHostLabel(backendStatusBase)})`,
+            'Backend busy processing session data'
+          );
+          return true;
+        }
+        return false;
+      }
       backendStatusBusy = true;
       // Avoid badge flicker during periodic background probes.
       if (force || !backendStatusBase) {
@@ -156,7 +172,7 @@
           }
         }
         backendProbeFailures += 1;
-        if (backendProbeFailures >= 3 || force) {
+        if (backendProbeFailures >= 5 || force) {
           setBackendStatus('offline', 'Backend: offline', 'FastAPI backend is not reachable');
         } else {
           setBackendStatus('checking', 'Backend: checking', 'Backend response delayed; retrying');
