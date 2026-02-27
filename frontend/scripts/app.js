@@ -197,6 +197,12 @@
       return Math.max(0, Math.min(100, n));
     }
 
+    function soberizeScore(v, pull = 0.35) {
+      const clampedPull = Math.max(0, Math.min(0.8, Number(pull) || 0));
+      const base = clampScore(v);
+      return clampScore(Math.round(50 + (base - 50) * (1 - clampedPull)));
+    }
+
     function localHeuristicAnalysis(text) {
       const words = (text || '').toLowerCase().match(/[a-z']+/g) || [];
       const sentences = (text || '').split(/[.!?]+/).map(s => s.trim()).filter(Boolean);
@@ -279,10 +285,11 @@
         ? sortedRisk[mid]
         : Math.round((sortedRisk[mid - 1] + sortedRisk[mid]) / 2);
       const spread = (sortedRisk[sortedRisk.length - 1] ?? 50) - (sortedRisk[0] ?? 50);
-      let riskScore = Math.round(riskMedian * 0.55 + riskMean * 0.45);
+      let riskScore = Math.round(riskMedian * 0.60 + riskMean * 0.40);
       // Damp high volatility across sessions to keep scoring fair and stable.
-      const neutralPull = Math.max(0, Math.min(0.32, (spread - 12) / 85));
+      const neutralPull = Math.max(0, Math.min(0.48, (spread - 10) / 70));
       riskScore = clampScore(Math.round(riskScore * (1 - neutralPull) + 50 * neutralPull));
+      riskScore = soberizeScore(riskScore, 0.22);
 
       let riskLabel, riskClass, riskColor, gradStop1, gradStop2, deltaText, deltaArrow;
       if (riskScore < 45) {
@@ -353,12 +360,13 @@
           const driftNorm = clampScore(Math.round((Math.max(0, Math.min(3.5, driftRaw)) / 3.5) * 100));
 
           // Backend-driven risk: primarily inverse CSI, with drift as secondary signal.
-          let risk = clampScore(Math.round((100 - csiRaw) * 0.88 + driftNorm * 0.12));
+          let risk = clampScore(Math.round((100 - csiRaw) * 0.86 + driftNorm * 0.14));
+          risk = soberizeScore(risk, 0.32);
 
           // Prevent abrupt visual jumps between consecutive sessions.
           if (prevRisk !== null) {
             const delta = risk - prevRisk;
-            const bounded = Math.max(-12, Math.min(12, delta));
+            const bounded = Math.max(-8, Math.min(8, delta));
             risk = clampScore(prevRisk + bounded);
           }
           prevRisk = risk;
@@ -405,13 +413,13 @@
           const fallbackCsi = clampScore(jd?.latest_csi ?? 50);
           const csiArrRaw = csi.length ? csi : [fallbackCsi];
           const csiArr = csiArrRaw.slice(-Math.max(1, expectedSessions));
-          const riskArr = csiArr.slice();
+          const riskArr = csiArr.map(v => soberizeScore(100 - v, 0.30));
           const emoArr = csiArr.map(v => clampScore(v * 0.9 + 5));
           const cogArr = csiArr.slice();
           const hesArr = csiArr.map(v => clampScore(v * 0.75));
           const linArr = csiArr.map(v => clampScore(100 - v * 0.6));
 
-          const riskScore = csiArr[csiArr.length - 1] ?? 50;
+          const riskScore = riskArr[riskArr.length - 1] ?? 50;
           let riskLabel = 'Low Risk', riskClass = 'low', riskColor = '#10b981', gradStop1 = '#10b981', gradStop2 = '#06b6d4', deltaText = 'Healthy range', deltaArrow = 'down';
           if (riskScore >= 35 && riskScore < 65) {
             riskLabel = 'Moderate Risk'; riskClass = 'moderate'; riskColor = '#f59e0b';
@@ -433,7 +441,7 @@
             description: `Your speech biomarkers were analyzed across ${jd.session_count || analysisTranscripts.length} sessions (FastAPI dashboard).`,
             insight: `Baseline ready: ${jd.baseline_ready ? 'yes' : 'no'}. Flagged features: ${(jd.flagged_features || []).join(', ') || 'none'}.`,
             insightMeta: 'Generated today · FastAPI dashboard · Not a clinical diagnosis',
-            csiScore: riskScore,
+            csiScore: csiArr[csiArr.length - 1] ?? fallbackCsi,
             indices: {
               emo: emoArr[emoArr.length - 1] ?? 50,
               cog: cogArr[cogArr.length - 1] ?? 50,
@@ -1161,18 +1169,20 @@
 
             // Background transcription only updates UI text; it does not block analysis.
             if (!browserText) {
-              const transcribed = await transcribeSessionAudio(rawBlob);
-              const idx = allTranscripts.findIndex(x => x.session === sessionId);
-              if (transcribed && transcribed.trim()) {
-                const resolvedText = transcribed.trim();
-                if (idx >= 0) allTranscripts[idx].text = resolvedText;
-                document.getElementById('stc-text').textContent = resolvedText;
-                document.getElementById('stc-words').textContent = `${resolvedText.split(' ').filter(w => w).length} words`;
-              } else if (idx >= 0 && allTranscripts[idx].text.toLowerCase().includes('pending')) {
-                allTranscripts[idx].text = 'Transcript unavailable for this session.';
-                document.getElementById('stc-text').textContent = 'Transcript unavailable for this session.';
-                document.getElementById('stc-words').textContent = '0 words';
-              }
+              void (async () => {
+                const transcribed = await transcribeSessionAudio(rawBlob);
+                const idx = allTranscripts.findIndex(x => x.session === sessionId);
+                if (transcribed && transcribed.trim()) {
+                  const resolvedText = transcribed.trim();
+                  if (idx >= 0) allTranscripts[idx].text = resolvedText;
+                  document.getElementById('stc-text').textContent = resolvedText;
+                  document.getElementById('stc-words').textContent = `${resolvedText.split(' ').filter(w => w).length} words`;
+                } else if (idx >= 0 && allTranscripts[idx].text.toLowerCase().includes('pending')) {
+                  allTranscripts[idx].text = 'Transcript unavailable for this session.';
+                  document.getElementById('stc-text').textContent = 'Transcript unavailable for this session.';
+                  document.getElementById('stc-words').textContent = '0 words';
+                }
+              })();
             }
           } catch (e) {
             console.warn('Session analytics upload failed', e);
