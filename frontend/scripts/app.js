@@ -854,6 +854,18 @@
       el.innerHTML = `<span class="has-text">${text}</span><span class="transcript-cursor"></span>`;
     }
 
+    function isCurrentSessionCard(sessionId) {
+      const badge = document.getElementById('stc-session-badge');
+      return !!badge && badge.textContent === `Session ${sessionId}`;
+    }
+
+    function updateSessionCardIfCurrent(sessionId, text) {
+      if (!isCurrentSessionCard(sessionId)) return;
+      document.getElementById('stc-text').textContent = text;
+      const count = String(text || '').split(' ').filter(w => w).length;
+      document.getElementById('stc-words').textContent = `${count} words`;
+    }
+
     async function uploadSessionForFeatureExtraction(blob, sessionId, transcriptText, fileName = null) {
       if (!blob) return null;
       const userId = getCurrentUserId();
@@ -1186,8 +1198,7 @@
               const idx = allTranscripts.findIndex(x => x.session === sessionId);
               if (idx >= 0 && !browserText) {
                 allTranscripts[idx].text = 'Transcript unavailable for this session.';
-                document.getElementById('stc-text').textContent = 'Transcript unavailable for this session.';
-                document.getElementById('stc-words').textContent = '0 words';
+                updateSessionCardIfCurrent(sessionId, 'Transcript unavailable for this session.');
               }
               return;
             }
@@ -1230,20 +1241,17 @@
                 if (transcribed && transcribed.trim()) {
                   const resolvedText = transcribed.trim();
                   if (idx >= 0) allTranscripts[idx].text = resolvedText;
-                  document.getElementById('stc-text').textContent = resolvedText;
-                  document.getElementById('stc-words').textContent = `${resolvedText.split(' ').filter(w => w).length} words`;
+                  updateSessionCardIfCurrent(sessionId, resolvedText);
                 } else if (idx >= 0 && allTranscripts[idx].text.toLowerCase().includes('pending')) {
                   allTranscripts[idx].text = 'Transcript unavailable for this session.';
-                  document.getElementById('stc-text').textContent = 'Transcript unavailable for this session.';
-                  document.getElementById('stc-words').textContent = '0 words';
+                  updateSessionCardIfCurrent(sessionId, 'Transcript unavailable for this session.');
                 }
               })();
             }
           } catch (e) {
             console.warn('Session analytics upload failed', e);
             const fallbackText = allTranscripts.find(x => x.session === sessionId)?.text || '';
-            document.getElementById('stc-text').textContent = fallbackText || `Session upload failed: ${e.message}`;
-            document.getElementById('stc-words').textContent = fallbackText ? `${fallbackText.split(' ').filter(w => w).length} words` : '0 words';
+            updateSessionCardIfCurrent(sessionId, fallbackText || `Session upload failed: ${e.message}`);
           } finally {
             // Keep microphone stream alive across sessions and don't clobber newer session state.
             if (recordedChunks === chunksRef) recordedChunks = [];
@@ -1255,8 +1263,7 @@
         const idx = allTranscripts.findIndex(x => x.session === sessionId);
         if (idx >= 0 && !browserText) {
           allTranscripts[idx].text = 'Transcript unavailable for this session.';
-          document.getElementById('stc-text').textContent = 'Transcript unavailable for this session.';
-          document.getElementById('stc-words').textContent = '0 words';
+          updateSessionCardIfCurrent(sessionId, 'Transcript unavailable for this session.');
         }
       }
       pendingTranscriptions[sessionId] = transcriptionPromise.finally(() => { delete pendingTranscriptions[sessionId]; });
