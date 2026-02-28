@@ -332,6 +332,11 @@
     async function computeUserAnalysis(transcripts) {
       function isInvalidTranscript(t) {
         if (!t || !t.text || !t.text.trim()) return true;
+        const sessionId = Number(t.session);
+        const hasBackendUpload = Number.isFinite(sessionId) && sessionId > 0 && !!currentRunSessionAnalytics[sessionId];
+        // If backend upload succeeded for this session, it should not be treated as skipped
+        // even when transcript text is still pending/unavailable.
+        if (hasBackendUpload) return false;
         const lower = t.text.toLowerCase();
         return (
           lower.includes('no speech recognized') ||
