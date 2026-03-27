@@ -27,11 +27,11 @@ def extract_mfccs(y: np.ndarray, sr: int, n_mfcc: int = 13) -> dict:
 
 def _extract_f0(y: np.ndarray, sr: int,
                 fmin: float = 50.0, fmax: float = 500.0):
-    """Run pYIN once, return voiced F0 array and voiced fraction."""
-    f0, voiced_flag, _ = librosa.pyin(y, fmin=fmin, fmax=fmax, sr=sr)
-    f0_voiced = f0[voiced_flag] if voiced_flag is not None else f0[~np.isnan(f0)]
-    voiced_frac = (float(np.sum(voiced_flag)) / len(voiced_flag)
-                   if voiced_flag is not None and len(voiced_flag) > 0 else 0.0)
+    """Run faster YIN pitch extraction, return voiced F0 array and voiced fraction."""
+    f0 = librosa.yin(y, fmin=fmin, fmax=fmax, sr=sr, frame_length=1024, hop_length=256)
+    voiced_flag = np.isfinite(f0) & (f0 > 0)
+    f0_voiced = f0[voiced_flag]
+    voiced_frac = float(np.mean(voiced_flag)) if len(f0) > 0 else 0.0
     return f0_voiced, voiced_frac
 
 
@@ -105,14 +105,23 @@ def extract_spectral_centroid(y: np.ndarray, sr: int) -> dict:
 # ── Speech Rate ──────────────────────────────────────────
 
 def estimate_speech_rate(y: np.ndarray, sr: int) -> dict:
-    """Estimate speech rate via onset detection as syllable proxy."""
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+    """Estimate speech rate using RMS peak events as a fast syllable proxy."""
+    rms = librosa.feature.rms(y=y, frame_length=1024, hop_length=256)[0]
     duration = len(y) / sr
-    rate = len(onsets) / duration if duration > 0 else 0.0
+    if len(rms) >= 3:
+        threshold = np.percentile(rms, 70)
+        peaks = (
+            (rms[1:-1] > rms[:-2]) &
+            (rms[1:-1] >= rms[2:]) &
+            (rms[1:-1] > threshold)
+        )
+        syllable_count = int(np.sum(peaks))
+    else:
+        syllable_count = 0
+    rate = syllable_count / duration if duration > 0 else 0.0
     return {
         'speech_rate': _safe_float(rate),
-        'syllable_count': len(onsets),
+        'syllable_count': syllable_count,
         'duration_sec': _safe_float(duration),
     }
 

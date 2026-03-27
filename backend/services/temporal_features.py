@@ -60,7 +60,7 @@ def extract_temporal_features(y: np.ndarray, sr: int,
     pause_variability = float(np.std(pause_durations)) if len(pause_durations) > 1 else 0.0
 
     # ── Speaking Speed Variability ────────────────────────
-    # Estimate local speech rate per segment using onset detection,
+    # Estimate local speech rate per segment using fast ZCR proxy,
     # then compute variance
     local_rates = []
     for s, e in intervals:
@@ -68,9 +68,8 @@ def extract_temporal_features(y: np.ndarray, sr: int,
         seg_dur = (e - s) / sr
         if seg_dur < 0.1:
             continue
-        onset_env = librosa.onset.onset_strength(y=seg, sr=sr)
-        onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
-        rate = len(onsets) / seg_dur
+        zcr = librosa.feature.zero_crossing_rate(seg, frame_length=512, hop_length=256)[0]
+        rate = float(np.mean(zcr)) * sr / 2.0
         local_rates.append(rate)
 
     speed_variability = float(np.var(local_rates)) if len(local_rates) > 1 else 0.0

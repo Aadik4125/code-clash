@@ -6,6 +6,13 @@ Loads environment variables for database, server, and analysis settings.
 import os
 from dotenv import load_dotenv
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
 # Load .env from project root (one level up from backend/)
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -47,3 +54,9 @@ CSI_WEIGHTS = {
     'lexical_diversity': 0.25,
     'speech_rate_variance': 0.25,
 }
+
+# Optional performance mode for constrained cloud instances.
+FAST_ANALYSIS_MODE = _env_bool(
+    'FAST_ANALYSIS_MODE',
+    default=True,
+)

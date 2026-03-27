@@ -5,13 +5,14 @@ import io
 import os
 import uuid
 import hashlib
+import re
 from typing import Any
 
 import librosa
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
-from config import AUDIO_UPLOAD_DIR
+from config import AUDIO_UPLOAD_DIR, FAST_ANALYSIS_MODE
 from database import get_db
 from models.session import Session
 from models.user import User
@@ -31,6 +32,29 @@ def _hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 200_000)
     return f'pbkdf2_sha256${salt.hex()}${digest.hex()}'
+
+
+def _fast_linguistic_fallback(text: str) -> dict[str, float]:
+    words = re.findall(r"[a-zA-Z']+", text.lower() if text else '')
+    word_count = len(words)
+    unique_count = len(set(words))
+    filler_set = {'um', 'uh', 'like', 'actually', 'basically', 'so', 'well', 'right'}
+    filler_count = sum(1 for w in words if w in filler_set)
+    lexical_diversity = (unique_count / word_count) if word_count else 0.0
+    filler_ratio = (filler_count / word_count) if word_count else 0.0
+    sentence_count = max(1, text.count('.') + text.count('!') + text.count('?')) if text else 0
+    sentence_length_mean = (word_count / sentence_count) if sentence_count else 0.0
+    return {
+        'sentence_length_mean': round(float(sentence_length_mean), 4),
+        'lexical_diversity': round(float(lexical_diversity), 4),
+        'avg_word_length': round(float(sum(len(w) for w in words) / word_count), 4) if word_count else 0.0,
+        'filler_ratio': round(float(filler_ratio), 4),
+        'content_word_ratio': round(float(max(0.0, 1.0 - filler_ratio)), 4),
+        'syntactic_complexity': round(float(min(3.0, sentence_count / 3.0)), 4),
+        'vocabulary_richness': round(float((word_count ** (unique_count ** -0.172)) if unique_count > 0 else 0.0), 4),
+        'word_count': word_count,
+        'sentence_count': sentence_count,
+    }
 
 @router.post('/user')
 def create_or_update_user(
@@ -128,21 +152,32 @@ async def upload_and_analyze(
     with open(filepath, 'wb') as file_obj:
         file_obj.write(audio_bytes)
 
-    try:
-        y, sr_loaded = librosa.load(io.BytesIO(audio_bytes), sr=16000, mono=True)
-        sr = int(sr_loaded)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f'Failed to decode audio: {str(exc)}')
+    if FAST_ANALYSIS_MODE:
+        preprocess_result = {
+            'duration_sec': 0.0,
+            'speech_duration_sec': 0.0,
+            'speech_ratio': 0.0,
+            'num_segments': 0,
+        }
+        acoustic = {}
+        temporal = {}
+        linguistic = _fast_linguistic_fallback(transcript) if transcript.strip() else {}
+    else:
+        try:
+            y, sr_loaded = librosa.load(io.BytesIO(audio_bytes), sr=16000, mono=True)
+            sr = int(sr_loaded)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f'Failed to decode audio: {str(exc)}')
 
-    preprocess_result = preprocess_audio(y, sr)
+        preprocess_result = preprocess_audio(y, sr)
 
-    acoustic = extract_all_acoustic_features(preprocess_result['y_speech'], sr)
+        acoustic = extract_all_acoustic_features(preprocess_result['y_speech'], sr)
 
-    temporal = extract_temporal_features(
-        preprocess_result['y_clean'], sr, preprocess_result['intervals']
-    )
+        temporal = extract_temporal_features(
+            preprocess_result['y_clean'], sr, preprocess_result['intervals']
+        )
 
-    linguistic = extract_linguistic_features(transcript) if transcript.strip() else {}
+        linguistic = extract_linguistic_features(transcript) if transcript.strip() else {}
 
     session_row = Session(
         user_id=user_id,
@@ -214,4 +249,5 @@ async def upload_and_analyze(
         'z_scores': z_scores,
         'drift': drift_data,
         'csi': csi_data,
+        'analysis_mode': 'fast' if FAST_ANALYSIS_MODE else 'full',
     }

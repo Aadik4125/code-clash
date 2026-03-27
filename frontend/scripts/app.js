@@ -781,7 +781,7 @@
     let liveTranscriptSnapshot = '';
     let mediaMimeType = 'audio/webm';
     let pendingTranscriptions = {};
-    const USE_BROWSER_SPEECH_RECOGNITION = false;
+    const USE_BROWSER_SPEECH_RECOGNITION = true;
     const RECORDING_QUESTIONS = [
       'How was your day?',
       'What was the last thing you did that got you in trouble?',
@@ -866,6 +866,21 @@
       document.getElementById('stc-words').textContent = `${count} words`;
     }
 
+    function renderAllTranscripts() {
+      const wrap = document.getElementById('all-transcripts');
+      const atc = document.getElementById('all-transcripts-content');
+      if (!wrap || !atc) return;
+      if (!allTranscripts.length) {
+        wrap.style.display = 'none';
+        atc.innerHTML = '';
+        return;
+      }
+      atc.innerHTML = allTranscripts.map(t =>
+        `<div class="transcript-session-header">Session ${t.session}</div><div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">${t.text}</div>`
+      ).join('');
+      wrap.style.display = 'block';
+    }
+
     async function uploadSessionForFeatureExtraction(blob, sessionId, transcriptText, fileName = null) {
       if (!blob) return null;
       const userId = getCurrentUserId();
@@ -881,7 +896,7 @@
           fd.append('transcript', transcriptText || '');
 
           const ctrl = new AbortController();
-          const timeout = setTimeout(() => ctrl.abort(), 25000);
+          const timeout = setTimeout(() => ctrl.abort(), 8000);
           const resp = await fetch(endpoint, { method: 'POST', body: fd, signal: ctrl.signal });
           clearTimeout(timeout);
           const jd = await resp.json().catch(() => ({}));
@@ -899,7 +914,7 @@
       return { skipped: true, error: (lastErr && lastErr.message) || 'Upload failed' };
     }
 
-    async function waitForPendingSessionUploads(maxMs = 25000) {
+    async function waitForPendingSessionUploads(maxMs = 5000) {
       const jobs = Object.values(pendingTranscriptions);
       if (!jobs.length) return;
       await Promise.race([
@@ -1041,6 +1056,7 @@
       currentRunSessionAnalytics = {};
       userAnalysis = null;
       sessionTranscript = '';
+      liveTranscriptSnapshot = '';
       // Reset UI
       for (let i = 1; i <= 3; i++) {
         const s = document.getElementById(`step-${i}`);
@@ -1055,8 +1071,7 @@
       document.getElementById('baseline-established').classList.remove('show');
       document.getElementById('session-transcript-card').classList.remove('show');
       document.getElementById('redo-btn').classList.remove('show');
-      document.getElementById('all-transcripts').style.display = 'none';
-      document.getElementById('all-transcripts-content').innerHTML = '';
+      renderAllTranscripts();
       document.getElementById('compare-float-btn').classList.remove('show');
       // Navigate to recording section
       hideAllPages();
@@ -1103,13 +1118,15 @@
       document.getElementById(`step-${currentStep}`).classList.add('active');
       document.getElementById('timer-label').textContent = getRecordingQuestion(currentStep);
 
-      // Optional browser speech recognition is disabled by default to avoid repeated permission prompts.
+      // Use browser speech recognition when available so transcript text appears during each recording.
       if (USE_BROWSER_SPEECH_RECOGNITION) {
         const hasSR = initSpeechRecognition();
         if (hasSR && recognition) {
           try {
             recognition.start();
           } catch (e) { }
+        } else {
+          updateTranscriptUI('Live transcript is not supported in this browser. Recording will still be saved per session.');
         }
       }
 
@@ -1135,6 +1152,9 @@
         mediaRecorder.start(250);
       }).catch(e => {
         mediaRecorder = null;
+        if (USE_BROWSER_SPEECH_RECOGNITION) {
+          updateTranscriptUI('Live transcript unavailable. Recording will still be saved for this session.');
+        }
         alert(`Microphone access failed: ${e.message}`);
       });
 
@@ -1163,6 +1183,7 @@
       const browserText = (sessionTranscript.trim() || liveTranscriptSnapshot || '').trim();
       const initialText = browserText || 'Transcript pending...';
       allTranscripts.push({ session: sessionId, text: initialText });
+      renderAllTranscripts();
 
       // Hide live transcript box
       document.getElementById('transcript-box').style.display = 'none';
@@ -1199,6 +1220,7 @@
               if (idx >= 0 && !browserText) {
                 allTranscripts[idx].text = 'Transcript unavailable for this session.';
                 updateSessionCardIfCurrent(sessionId, 'Transcript unavailable for this session.');
+                renderAllTranscripts();
               }
               return;
             }
@@ -1242,9 +1264,11 @@
                   const resolvedText = transcribed.trim();
                   if (idx >= 0) allTranscripts[idx].text = resolvedText;
                   updateSessionCardIfCurrent(sessionId, resolvedText);
+                  renderAllTranscripts();
                 } else if (idx >= 0 && allTranscripts[idx].text.toLowerCase().includes('pending')) {
                   allTranscripts[idx].text = 'Transcript unavailable for this session.';
                   updateSessionCardIfCurrent(sessionId, 'Transcript unavailable for this session.');
+                  renderAllTranscripts();
                 }
               })();
             }
@@ -1264,6 +1288,7 @@
         if (idx >= 0 && !browserText) {
           allTranscripts[idx].text = 'Transcript unavailable for this session.';
           updateSessionCardIfCurrent(sessionId, 'Transcript unavailable for this session.');
+          renderAllTranscripts();
         }
       }
       pendingTranscriptions[sessionId] = transcriptionPromise.finally(() => { delete pendingTranscriptions[sessionId]; });
@@ -1295,13 +1320,9 @@
         document.getElementById('transcript-box').style.display = 'none';
 
         Promise.resolve()
-          .then(() => waitForPendingSessionUploads(45000))
+          .then(() => waitForPendingSessionUploads(5000))
           .then(() => {
-            const atc = document.getElementById('all-transcripts-content');
-            atc.innerHTML = allTranscripts.map(t =>
-              `<div class="transcript-session-header">Session ${t.session}</div><div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">${t.text}</div>`
-            ).join('');
-            document.getElementById('all-transcripts').style.display = 'block';
+            renderAllTranscripts();
             return computeUserAnalysis(allTranscripts);
           })
           .then(result => {
@@ -1359,6 +1380,9 @@
       currentStep--;
       // Remove from transcripts array
       allTranscripts = allTranscripts.filter(t => t.session !== currentStep);
+      delete currentRunSessionAnalytics[currentStep];
+      delete pendingTranscriptions[currentStep];
+      renderAllTranscripts();
       // Reset the step pill
       const step = document.getElementById(`step-${currentStep}`);
       step.classList.remove('completed');
