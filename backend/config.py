@@ -49,14 +49,30 @@ os.makedirs(AUDIO_UPLOAD_DIR, exist_ok=True)
 
 # ── CSI Weights (equal by default) ────────────────────────
 CSI_WEIGHTS = {
-    'mfcc_variance': 0.25,
-    'pause_variability': 0.25,
-    'lexical_diversity': 0.25,
-    'speech_rate_variance': 0.25,
+    'mfcc_variance_avg': 0.10,
+    'pitch_var': 0.07,
+    'jitter_local': 0.06,
+    'shimmer_local': 0.06,
+    'spectral_centroid_mean': 0.05,
+    'energy_var': 0.06,
+    'speech_rate': 0.08,
+    'response_latency': 0.07,
+    'rhythm_consistency': 0.06,
+    'pause_variability': 0.08,
+    'speed_variability': 0.07,
+    'mean_pause_duration': 0.05,
+    'lexical_diversity': 0.08,
+    'filler_ratio': 0.04,
+    'content_word_ratio': 0.03,
+    'syntactic_complexity': 0.04,
+    'vocabulary_richness': 0.05,
+    'sentence_length_mean': 0.03,
+    'speech_ratio': 0.01,
+    'speech_segment_count': 0.01,
 }
 
 # Optional performance mode for constrained cloud instances.
 FAST_ANALYSIS_MODE = _env_bool(
     'FAST_ANALYSIS_MODE',
-    default=True,
+    default=False,
 )

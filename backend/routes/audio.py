@@ -176,6 +176,13 @@ async def upload_and_analyze(
         temporal = extract_temporal_features(
             preprocess_result['y_clean'], sr, preprocess_result['intervals']
         )
+        temporal.update(
+            {
+                'speech_ratio': round(float(preprocess_result['speech_ratio']), 4),
+                'speech_duration_sec': round(float(preprocess_result['speech_duration_sec']), 4),
+                'speech_segment_count': int(preprocess_result['num_segments']),
+            }
+        )
 
         linguistic = extract_linguistic_features(transcript) if transcript.strip() else {}
 
