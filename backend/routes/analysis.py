@@ -8,6 +8,7 @@ from database import get_db
 from models.baseline import Baseline
 from models.session import Session
 from models.user import User
+from routes.auth import require_current_user
 from services.baseline import compute_z_scores
 from services.csi import compute_csi
 from services.drift import compute_drift
@@ -22,7 +23,9 @@ class AnalyzeRequest(BaseModel):
 
 
 @router.post('/analyze')
-def analyze_text(req: AnalyzeRequest, db: DBSession = Depends(get_db)):
+def analyze_text(req: AnalyzeRequest, db: DBSession = Depends(get_db), current_user: User = Depends(require_current_user)):
+    if current_user.id != req.user_id:
+        raise HTTPException(status_code=403, detail='Cannot analyze another user')
     
     user = db.query(User).filter(User.id == req.user_id).first()
     if not user:
@@ -59,8 +62,10 @@ def analyze_text(req: AnalyzeRequest, db: DBSession = Depends(get_db)):
 
 
 @router.get('/sessions/{user_id}')
-def get_sessions(user_id: int, db: DBSession = Depends(get_db)):
+def get_sessions(user_id: int, db: DBSession = Depends(get_db), current_user: User = Depends(require_current_user)):
     """Retrieve all sessions for a user, ordered chronologically."""
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail='Cannot view another user sessions')
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
