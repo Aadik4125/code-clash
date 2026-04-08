@@ -342,7 +342,7 @@
         return (
           lower.includes('no speech recognized') ||
           lower.includes('waiting for whisper') ||
-          lower.includes('transcript pending')
+          lower.includes('transcript unavailable')
         );
       }
 
@@ -785,6 +785,7 @@
     let liveTranscriptSnapshot = '';
     let mediaMimeType = 'audio/webm';
     let pendingTranscriptions = {};
+    let recordingStartedAt = 0;
     const USE_BROWSER_SPEECH_RECOGNITION = true;
     const RECORDING_QUESTIONS = [
       'How was your day?',
@@ -795,6 +796,15 @@
     function getRecordingQuestion(step) {
       const idx = Number(step) - 1;
       return RECORDING_QUESTIONS[idx] || RECORDING_QUESTIONS[RECORDING_QUESTIONS.length - 1];
+    }
+
+    function countWords(text) {
+      return (String(text || '').match(/[a-z0-9']+/gi) || []).length;
+    }
+
+    function formatRecordedDuration(seconds) {
+      const safe = Math.max(0.1, Number(seconds) || 0);
+      return `${safe.toFixed(1)} sec recorded`;
     }
 
     function releaseMicrophone() {
@@ -866,8 +876,15 @@
     function updateSessionCardIfCurrent(sessionId, text) {
       if (!isCurrentSessionCard(sessionId)) return;
       document.getElementById('stc-text').textContent = text;
-      const count = String(text || '').split(' ').filter(w => w).length;
-      document.getElementById('stc-words').textContent = `${count} words`;
+      if (/transcript pending/i.test(String(text || ''))) {
+        document.getElementById('stc-words').textContent = 'Counting words...';
+        return;
+      }
+      if (/transcript unavailable|no speech recognized/i.test(String(text || ''))) {
+        document.getElementById('stc-words').textContent = 'Word count unavailable';
+        return;
+      }
+      document.getElementById('stc-words').textContent = `${countWords(text)} words`;
     }
 
     function renderAllTranscripts() {
@@ -1103,6 +1120,7 @@
     function startRecording() {
       isRecording = true;
       timeLeft = 30;
+      recordingStartedAt = performance.now();
       sessionTranscript = '';
       liveTranscriptSnapshot = '';
       // Hide previous session transcript card while recording
@@ -1173,6 +1191,7 @@
     function stopRecording() {
       isRecording = false;
       if (recognition) { try { recognition.stop(); } catch (e) { } }
+      const elapsedSec = Math.min(30, Math.max(0.1, (performance.now() - recordingStartedAt) / 1000));
 
       document.getElementById('record-btn').classList.remove('recording');
       document.getElementById('record-ring').classList.remove('active');
@@ -1193,11 +1212,11 @@
       document.getElementById('transcript-box').style.display = 'none';
 
       // Show session transcript card with REAL spoken text
-      const wordCount = initialText.split(' ').filter(w => w.length > 0).length;
       const stc = document.getElementById('session-transcript-card');
       document.getElementById('stc-session-badge').textContent = `Session ${sessionId}`;
       document.getElementById('stc-text').textContent = initialText;
-      document.getElementById('stc-words').textContent = `${wordCount} words`;
+      document.getElementById('stc-words').textContent = browserText ? `${countWords(browserText)} words` : 'Counting words...';
+      document.getElementById('stc-duration').textContent = formatRecordedDuration(elapsedSec);
       stc.classList.add('show');
 
       // Snapshot recorder state for this session to avoid cross-session race conditions.
@@ -1229,6 +1248,7 @@
               return;
             }
             const rawBlob = new Blob(chunksRef, { type: mimeTypeRef || 'audio/webm' });
+            const transcribePromise = !browserText ? transcribeSessionAudio(rawBlob) : Promise.resolve(null);
             // Do not block backend upload on transcription API latency.
             // If browser transcript is unavailable, upload with empty transcript.
             const transcriptText = browserText || '';
@@ -1262,7 +1282,7 @@
             // Background transcription only updates UI text; it does not block analysis.
             if (!browserText) {
               void (async () => {
-                const transcribed = await transcribeSessionAudio(rawBlob);
+                const transcribed = await transcribePromise;
                 const idx = allTranscripts.findIndex(x => x.session === sessionId);
                 if (transcribed && transcribed.trim()) {
                   const resolvedText = transcribed.trim();
@@ -1324,7 +1344,7 @@
         document.getElementById('transcript-box').style.display = 'none';
 
         Promise.resolve()
-          .then(() => waitForPendingSessionUploads(5000))
+          .then(() => waitForPendingSessionUploads(12000))
           .then(() => {
             renderAllTranscripts();
             return computeUserAnalysis(allTranscripts);
@@ -1762,38 +1782,96 @@
     // ══════════════════════════════════════════════
     //  WAVEFORM
     // ══════════════════════════════════════════════
+    const waveformEvents = [
+      { pct: 23, time: '00:07', label: 'Pitch Spike', color: '#2f7dd1', detail: 'A sharp pitch excursion suggests abrupt vocal effort or emphasis at this point in the recording.' },
+      { pct: 40, time: '00:12', label: 'Elevated Stress', color: '#ef7d1a', detail: 'Stress-colored bars cluster here, indicating heightened vocal tension and denser energy variation.' },
+      { pct: 60, time: '00:18', label: 'Hesitation', color: '#f05252', detail: 'The waveform narrows and breaks into shorter pulses, consistent with a hesitation-heavy segment.' },
+      { pct: 76, time: '00:23', label: 'Negative Tone', color: '#f97316', detail: 'This segment is flagged for heavier tonal pressure and a more strained delivery pattern.' },
+      { pct: 90, time: '00:27', label: 'Reduced Pitch Variation', color: '#1cb5a3', detail: 'Pitch variation flattens toward the end of the session, suggesting lower expressiveness in the closing phrase.' }
+    ];
+
+    function setWaveformDetail(eventInfo) {
+      const timeEl = document.getElementById('waveform-detail-time');
+      const titleEl = document.getElementById('waveform-detail-title');
+      const copyEl = document.getElementById('waveform-detail-copy');
+      if (!timeEl || !titleEl || !copyEl) return;
+      if (!eventInfo) {
+        timeEl.textContent = '00:12';
+        titleEl.textContent = 'Elevated Stress';
+        copyEl.textContent = 'Hover across the waveform or select a marker to inspect the strongest speech event in this recording.';
+        return;
+      }
+      timeEl.textContent = eventInfo.time;
+      titleEl.textContent = eventInfo.label;
+      copyEl.textContent = eventInfo.detail;
+    }
+
+    function highlightWaveform(index) {
+      const bars = Array.from(document.querySelectorAll('#waveform-svg .waveform-bar'));
+      if (!bars.length) return;
+      bars.forEach((bar, i) => {
+        const near = index >= 0 && Math.abs(i - index) <= 2;
+        bar.classList.toggle('is-active', near);
+        bar.classList.toggle('is-dim', index >= 0 && !near);
+      });
+    }
+
+    function activateMarker(markerIndex) {
+      const markers = Array.from(document.querySelectorAll('#markers .marker'));
+      markers.forEach((marker, idx) => marker.classList.toggle('active', idx === markerIndex));
+      setWaveformDetail(waveformEvents[markerIndex] || null);
+      if (markerIndex >= 0) {
+        const targetPct = waveformEvents[markerIndex].pct;
+        const targetIndex = Math.max(0, Math.min(119, Math.round((targetPct / 100) * 119)));
+        highlightWaveform(targetIndex);
+      }
+    }
+
     function generateWaveform() {
       const svg = document.getElementById('waveform-svg');
       if (!svg) return;
       let html = '';
       for (let i = 0; i < 120; i++) {
-        const x = (i / 120) * 800;
-        const seed = Math.sin(i * 0.4) * 0.5 + Math.sin(i * 0.13) * 0.3 + Math.random() * 0.2;
-        const h = 8 + Math.abs(seed) * 48; const y = 40 - h / 2;
-        let c = '#93c5e8';
-        if (i > 16 && i < 20) c = '#fde68a';
-        if (i > 28 && i < 34) c = '#fca5a5';
-        if (i > 42 && i < 46) c = '#fca5a5';
-        if (i > 54 && i < 58) c = '#fdba74';
-        if (i > 64 && i < 68) c = '#6ee7da';
-        html += `<rect x="${x}" y="${y}" width="4" height="${h}" rx="2" fill="${c}" opacity="0.9"/>`;
+        const x = 8 + (i / 120) * 784;
+        const envelope = 0.52 + 0.48 * Math.sin(i * 0.19 + 0.4) ** 2;
+        const motion = Math.sin(i * 0.42) * 0.45 + Math.sin(i * 0.11 + 1.7) * 0.22 + Math.cos(i * 0.07) * 0.18;
+        const h = 10 + Math.abs(motion) * 34 + envelope * 16;
+        const y = 46 - h / 2;
+        let c = '#78aee3';
+        if (i > 16 && i < 20) c = '#e8b949';
+        if (i > 28 && i < 34) c = '#f08b86';
+        if (i > 42 && i < 46) c = '#ef9f70';
+        if (i > 54 && i < 58) c = '#eda35f';
+        if (i > 64 && i < 68) c = '#37b9ab';
+        html += `<rect class="waveform-bar" data-index="${i}" x="${x}" y="${y}" width="4.8" height="${h}" rx="2.4" fill="${c}" opacity="0.96"/>`;
       }
       svg.innerHTML = html;
+      svg.onmouseleave = () => activateMarker(1);
+      svg.onmousemove = (event) => {
+        const rect = svg.getBoundingClientRect();
+        const pct = (event.clientX - rect.left) / Math.max(rect.width, 1);
+        const index = Math.max(0, Math.min(119, Math.round(pct * 119)));
+        highlightWaveform(index);
+        const nearest = waveformEvents.reduce((bestIdx, item, idx) => {
+          const bestDist = Math.abs(waveformEvents[bestIdx].pct - pct * 100);
+          const currDist = Math.abs(item.pct - pct * 100);
+          return currDist < bestDist ? idx : bestIdx;
+        }, 0);
+        setWaveformDetail(waveformEvents[nearest]);
+      };
+      activateMarker(1);
     }
 
     function generateMarkers() {
       const c = document.getElementById('markers');
       if (!c) return;
       c.innerHTML = '';
-      [{ pct: 23, label: '00:07 – Pitch Spike', color: '#1a6eb5' },
-      { pct: 40, label: '00:12 – Elevated Stress', color: '#ef4444' },
-      { pct: 60, label: '00:18 – Hesitation', color: '#f59e0b' },
-      { pct: 76, label: '00:23 – Negative Tone', color: '#f97316' },
-      { pct: 90, label: '00:27 – Reduced Pitch Variation', color: '#18b09e' }]
-        .forEach(m => {
+      waveformEvents.forEach((m, idx) => {
           const d = document.createElement('div');
           d.className = 'marker'; d.style.left = `${m.pct}%`;
-          d.innerHTML = `<div class="marker-tooltip">${m.label}</div><div class="marker-line"></div><div class="marker-dot" style="background:${m.color};"></div>`;
+          d.innerHTML = `<div class="marker-tooltip">${m.time} â€” ${m.label}</div><div class="marker-line"></div><div class="marker-dot" style="background:${m.color};"></div>`;
+          d.addEventListener('mouseenter', () => activateMarker(idx));
+          d.addEventListener('click', () => activateMarker(idx));
           c.appendChild(d);
         });
       const tl = document.getElementById('waveform-timeline');
@@ -1806,6 +1884,7 @@
           tl.appendChild(el);
         });
       }
+      activateMarker(1);
     }
 
     // ══════════════════════════════════════════════
