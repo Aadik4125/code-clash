@@ -796,7 +796,7 @@
     let mediaMimeType = 'audio/webm';
     let pendingTranscriptions = {};
     let recordingStartedAt = 0;
-    const USE_BROWSER_SPEECH_RECOGNITION = true;
+    const USE_BROWSER_SPEECH_RECOGNITION = false;
     const RECORDING_QUESTIONS = [
       'How was your day?',
       'What was the last thing you did that got you in trouble?',
@@ -875,6 +875,7 @@
 
     function updateTranscriptUI(text) {
       const el = document.getElementById('transcript-text');
+      if (!el) return;
       el.innerHTML = `<span class="has-text">${text}</span><span class="transcript-cursor"></span>`;
     }
 
@@ -1134,10 +1135,14 @@
       sessionTranscript = '';
       liveTranscriptSnapshot = '';
       // Hide previous session transcript card while recording
-      document.getElementById('session-transcript-card').classList.remove('show');
-      document.getElementById('redo-btn').classList.remove('show');
-      document.getElementById('transcript-box').style.display = 'block';
-      document.getElementById('transcript-text').innerHTML = '<em>Listening… speak naturally</em><span class="transcript-cursor"></span>';
+      const sessionTranscriptCard = document.getElementById('session-transcript-card');
+      const redoBtn = document.getElementById('redo-btn');
+      const transcriptBox = document.getElementById('transcript-box');
+      const transcriptText = document.getElementById('transcript-text');
+      if (sessionTranscriptCard) sessionTranscriptCard.classList.remove('show');
+      if (redoBtn) redoBtn.classList.remove('show');
+      if (transcriptBox) transcriptBox.style.display = 'block';
+      if (transcriptText) transcriptText.innerHTML = '<em>Listening… speak naturally</em><span class="transcript-cursor"></span>';
 
       document.getElementById('record-btn').classList.add('recording');
       document.getElementById('record-ring').classList.add('active');
@@ -1203,31 +1208,43 @@
       if (recognition) { try { recognition.stop(); } catch (e) { } }
       const elapsedSec = Math.min(30, Math.max(0.1, (performance.now() - recordingStartedAt) / 1000));
 
-      document.getElementById('record-btn').classList.remove('recording');
-      document.getElementById('record-ring').classList.remove('active');
-      document.getElementById('record-ring2').classList.remove('active');
-      document.getElementById('mic-idle').style.display = 'block';
-      document.getElementById('mic-active').style.display = 'none';
-      document.getElementById('record-label').classList.remove('on');
-      document.getElementById('timer').classList.remove('active');
+      const recordBtn = document.getElementById('record-btn');
+      const recordRing = document.getElementById('record-ring');
+      const recordRing2 = document.getElementById('record-ring2');
+      const micIdle = document.getElementById('mic-idle');
+      const micActive = document.getElementById('mic-active');
+      const recordLabel = document.getElementById('record-label');
+      const timerEl = document.getElementById('timer');
+      if (recordBtn) recordBtn.classList.remove('recording');
+      if (recordRing) recordRing.classList.remove('active');
+      if (recordRing2) recordRing2.classList.remove('active');
+      if (micIdle) micIdle.style.display = 'block';
+      if (micActive) micActive.style.display = 'none';
+      if (recordLabel) recordLabel.classList.remove('on');
+      if (timerEl) timerEl.classList.remove('active');
 
       const sessionId = currentStep;
-      // Prefer browser transcript when available; otherwise fill from server transcription.
+      // Keep the session moving even if transcript capture is unavailable.
       const browserText = (sessionTranscript.trim() || liveTranscriptSnapshot || '').trim();
       const initialText = browserText || 'Transcript pending...';
       allTranscripts.push({ session: sessionId, text: initialText });
       renderAllTranscripts();
 
       // Hide live transcript box
-      document.getElementById('transcript-box').style.display = 'none';
+      const transcriptBox = document.getElementById('transcript-box');
+      if (transcriptBox) transcriptBox.style.display = 'none';
 
       // Show session transcript card with REAL spoken text
       const stc = document.getElementById('session-transcript-card');
-      document.getElementById('stc-session-badge').textContent = `Session ${sessionId}`;
-      document.getElementById('stc-text').textContent = initialText;
-      document.getElementById('stc-words').textContent = browserText ? `${countWords(browserText)} words` : 'Counting words...';
-      document.getElementById('stc-duration').textContent = formatRecordedDuration(elapsedSec);
-      stc.classList.add('show');
+      const stcBadge = document.getElementById('stc-session-badge');
+      const stcText = document.getElementById('stc-text');
+      const stcWords = document.getElementById('stc-words');
+      const stcDuration = document.getElementById('stc-duration');
+      if (stcBadge) stcBadge.textContent = `Session ${sessionId}`;
+      if (stcText) stcText.textContent = initialText;
+      if (stcWords) stcWords.textContent = browserText ? `${countWords(browserText)} words` : 'Counting words...';
+      if (stcDuration) stcDuration.textContent = formatRecordedDuration(elapsedSec);
+      if (stc) stc.classList.add('show');
 
       // Snapshot recorder state for this session to avoid cross-session race conditions.
       const recorderRef = mediaRecorder;
@@ -1340,21 +1357,31 @@
       }
 
       if (completedSteps < 3) {
-        document.getElementById('timer').textContent = '0:30';
-        document.getElementById('progress-bar').style.width = '0%';
-        document.getElementById('record-label').textContent = 'Tap to Record';
-        document.getElementById('timer-label').textContent = getRecordingQuestion(currentStep);
+        if (timerEl) timerEl.textContent = '0:30';
+        const progressBar = document.getElementById('progress-bar');
+        const timerLabel = document.getElementById('timer-label');
+        if (progressBar) progressBar.style.width = '0%';
+        if (recordLabel) recordLabel.textContent = 'Tap to Record';
+        if (timerLabel) timerLabel.textContent = getRecordingQuestion(currentStep);
+        setTimeout(() => {
+          if (!isRecording && completedSteps < 3) startRecording();
+        }, 250);
       } else {
-        document.getElementById('progress-bar').style.width = '100%';
-        document.getElementById('timer').textContent = '✓';
-        document.getElementById('timer').style.letterSpacing = '0';
-        document.getElementById('timer-label').textContent = 'Analyzing speech biomarkers…';
-        document.getElementById('record-label').textContent = 'Complete';
-        document.getElementById('baseline-established').classList.add('show');
-        document.getElementById('transcript-box').style.display = 'none';
+        const progressBar = document.getElementById('progress-bar');
+        const timerLabel = document.getElementById('timer-label');
+        const baselineEstablished = document.getElementById('baseline-established');
+        if (progressBar) progressBar.style.width = '100%';
+        if (timerEl) {
+          timerEl.textContent = '✓';
+          timerEl.style.letterSpacing = '0';
+        }
+        if (timerLabel) timerLabel.textContent = 'Wrapping up...';
+        if (recordLabel) recordLabel.textContent = 'Complete';
+        if (baselineEstablished) baselineEstablished.classList.add('show');
+        if (transcriptBox) transcriptBox.style.display = 'none';
 
         Promise.resolve()
-          .then(() => waitForPendingSessionUploads(12000))
+          .then(() => waitForPendingSessionUploads(2500))
           .then(() => {
             renderAllTranscripts();
             return computeUserAnalysis(allTranscripts);
@@ -1397,7 +1424,7 @@
             currentComparePatient = best;
             renderComparePage(currentComparePatient);
 
-            setTimeout(showDashboard, 2200);
+            setTimeout(showDashboard, 900);
           })
           .catch(err => {
             console.error('Analysis failed', err);
