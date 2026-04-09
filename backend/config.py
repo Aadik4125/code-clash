@@ -26,10 +26,28 @@ else:
         raise RuntimeError('DATABASE_URL is required on Render. Connect your Postgres instance.')
     DATABASE_URL = 'sqlite:///' + os.path.join(os.path.dirname(__file__), 'cognivara.db')
 
-if DATABASE_URL.startswith('postgres://'):
-    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql+psycopg://', 1)
-elif DATABASE_URL.startswith('postgresql://'):
-    DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+psycopg://', 1)
+def _resolve_postgres_dialect(url: str) -> str:
+    if not (url.startswith('postgres://') or url.startswith('postgresql://')):
+        return url
+
+    suffix = url.split('://', 1)[1]
+    try:
+        import psycopg  # noqa: F401
+        return f'postgresql+psycopg://{suffix}'
+    except Exception:
+        pass
+
+    try:
+        import psycopg2  # noqa: F401
+        return f'postgresql+psycopg2://{suffix}'
+    except Exception:
+        pass
+
+    # Fall back to SQLAlchemy's default postgres URL so the deploy log points
+    # to the missing driver more directly instead of forcing the wrong dialect.
+    return f'postgresql://{suffix}'
+
+DATABASE_URL = _resolve_postgres_dialect(DATABASE_URL)
 
 # ── Server ────────────────────────────────────────────────
 FASTAPI_PORT = int(os.getenv('FASTAPI_PORT', '8000'))
