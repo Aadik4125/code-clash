@@ -797,6 +797,41 @@
       if (timerLabel) timerLabel.textContent = getRecordingQuestion(step);
     }
 
+    function prepareNextRecordingStep() {
+      const recordBtn = document.getElementById('record-btn');
+      const recordLabel = document.getElementById('record-label');
+      const timer = document.getElementById('timer');
+      const progressBar = document.getElementById('progress-bar');
+      const redoBtn = document.getElementById('redo-btn');
+      const transcriptBox = document.getElementById('transcript-box');
+      const sessionTranscriptCard = document.getElementById('session-transcript-card');
+
+      if (redoBtn) redoBtn.classList.remove('show');
+      if (transcriptBox) transcriptBox.style.display = 'none';
+      if (sessionTranscriptCard) sessionTranscriptCard.classList.remove('show');
+      if (timer) {
+        timer.classList.remove('active');
+        timer.textContent = '0:30';
+        timer.style.letterSpacing = '';
+      }
+      if (progressBar) progressBar.style.width = '0%';
+      if (recordLabel) {
+        recordLabel.classList.remove('on');
+        recordLabel.textContent = `Tap to Record ${currentStep}`;
+      }
+      if (recordBtn) {
+        recordBtn.classList.remove('recording', 'disabled');
+        recordBtn.disabled = false;
+        recordBtn.style.pointerEvents = 'auto';
+        recordBtn.style.opacity = '1';
+      }
+      updateRecordingPrompt(currentStep);
+      setTimeout(() => {
+        const wrap = document.querySelector('.record-button-wrap');
+        if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    }
+
     function resetRecordingUiState() {
       isRecording = false;
       isRecordingTransition = false;
@@ -1374,21 +1409,13 @@
 
       // Show redo button (only if not all 3 done yet, so user can redo last session)
       if (completedSteps < 3) {
-        document.getElementById('redo-btn').classList.add('show');
+        document.getElementById('redo-btn').classList.remove('show');
       }
 
       if (completedSteps < 3) {
         const nextStep = document.getElementById(`step-${currentStep}`);
-        const recordBtn = document.getElementById('record-btn');
         if (nextStep) nextStep.classList.add('active');
-        document.getElementById('timer').textContent = '0:30';
-        document.getElementById('progress-bar').style.width = '0%';
-        document.getElementById('record-label').textContent = `Start Recording ${currentStep}`;
-        if (recordBtn) {
-          recordBtn.classList.remove('disabled');
-          recordBtn.disabled = false;
-        }
-        updateRecordingPrompt(currentStep);
+        prepareNextRecordingStep();
         isRecordingTransition = false;
       } else {
         document.getElementById('progress-bar').style.width = '100%';
