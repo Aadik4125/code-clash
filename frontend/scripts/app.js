@@ -64,6 +64,7 @@
     let backendProbeFailures = 0;
     let backendLastOkAt = 0;
     const PRODUCTION_BACKEND_URL = 'https://cognivara-backend-service.onrender.com';
+    const PRODUCTION_NODE_URL = 'https://cognivara-node.onrender.com';
 
     function getApiBase() {
       if (window.COGNIVARA_API_BASE && String(window.COGNIVARA_API_BASE).trim()) {
@@ -81,20 +82,15 @@
 
     function getFastApiCandidates() {
       const preferred = getApiBase();
-      const currentOrigin = (window.location.origin || '').replace(/\/$/, '');
       let preferredHost = '';
       try {
         preferredHost = new URL(preferred).hostname;
       } catch (e) {}
       const isLocalPreferred = preferredHost === 'localhost' || preferredHost === '127.0.0.1';
       if (!isLocalPreferred && preferred) {
-        const set = new Set([String(preferred).replace(/\/$/, '')]);
-        if (currentOrigin && currentOrigin !== preferred) set.add(currentOrigin);
-        if (PRODUCTION_BACKEND_URL && PRODUCTION_BACKEND_URL !== preferred) set.add(PRODUCTION_BACKEND_URL);
-        return Array.from(set);
+        return [String(preferred).replace(/\/$/, '')];
       }
       const set = new Set([preferred, 'http://localhost:8000', 'http://127.0.0.1:8000']);
-      if (currentOrigin && /^https?:\/\//.test(currentOrigin)) set.add(currentOrigin);
       if (PRODUCTION_BACKEND_URL) set.add(PRODUCTION_BACKEND_URL);
       return Array.from(set).filter(Boolean).map(v => String(v).replace(/\/$/, ''));
     }
@@ -128,7 +124,7 @@
         : state === 'offline'
           ? 'Backend: offline'
           : 'Backend: checking';
-      label.textContent = defaultText;
+      label.textContent = text || defaultText;
       badge.title = title || defaultText;
     }
 
@@ -978,10 +974,12 @@
     async function transcribeSessionAudio(blob) {
       if (!blob) return null;
       const candidates = [];
-      if (window.location.origin && /^https?:\/\//.test(window.location.origin)) {
-        candidates.push(window.location.origin.replace(/\/$/, ''));
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:';
+      if (isLocal) {
+        candidates.push('http://localhost:3000', 'http://127.0.0.1:3000');
+      } else {
+        candidates.push(PRODUCTION_NODE_URL);
       }
-      candidates.push('http://localhost:3000', 'http://127.0.0.1:3000');
 
       for (const base of candidates) {
         for (let attempt = 0; attempt < 2; attempt++) {
