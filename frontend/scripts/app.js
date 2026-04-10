@@ -124,7 +124,7 @@
         : state === 'offline'
           ? 'Backend: offline'
           : 'Backend: checking';
-      label.textContent = text || defaultText;
+      label.textContent = defaultText;
       badge.title = title || defaultText;
     }
 
@@ -1298,11 +1298,15 @@
 
       // Show session transcript card with REAL spoken text
       const stc = document.getElementById('session-transcript-card');
-      document.getElementById('stc-session-badge').textContent = `Session ${sessionId}`;
-      document.getElementById('stc-text').textContent = initialText;
-      document.getElementById('stc-words').textContent = browserText ? `${countWords(browserText)} words` : 'Counting words...';
-      document.getElementById('stc-duration').textContent = formatRecordedDuration(elapsedSec);
-      stc.classList.add('show');
+      const stcBadge = document.getElementById('stc-session-badge');
+      const stcText = document.getElementById('stc-text');
+      const stcWords = document.getElementById('stc-words');
+      const stcDuration = document.getElementById('stc-duration');
+      if (stcBadge) stcBadge.textContent = `Session ${sessionId}`;
+      if (stcText) stcText.textContent = initialText;
+      if (stcWords) stcWords.textContent = browserText ? `${countWords(browserText)} words` : 'Counting words...';
+      if (stcDuration) stcDuration.textContent = formatRecordedDuration(elapsedSec);
+      if (stc) stc.classList.add('show');
 
       // Snapshot recorder state for this session to avoid cross-session race conditions.
       const recorderRef = mediaRecorder;
