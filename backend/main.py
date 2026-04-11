@@ -53,7 +53,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=CORS_ORIGINS + [
+        "https://cognivara.lovable.app",
+        "https://cognivarav2.app",
+        "https://www.cognivarav2.app",
+    ],
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
@@ -101,3 +105,4 @@ if __name__ == '__main__':
     import uvicorn
 
     uvicorn.run(app, host='0.0.0.0', port=FASTAPI_PORT, reload=False)
+    
