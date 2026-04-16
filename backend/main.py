@@ -104,5 +104,13 @@ def root():
 if __name__ == '__main__':
     import uvicorn
 
-    uvicorn.run(app, host='0.0.0.0', port=FASTAPI_PORT, reload=False)
+    # Bind to Render's provided port when available (env `PORT`).
+    # Render requires services to listen on the port it assigns via the PORT env var.
+    port_env = os.getenv('PORT')
+    try:
+        port_to_use = int(port_env) if port_env is not None else int(FASTAPI_PORT)
+    except Exception:
+        port_to_use = FASTAPI_PORT
+
+    uvicorn.run(app, host='0.0.0.0', port=port_to_use, reload=False)
     
