@@ -2,10 +2,12 @@ services:
   - type: web
     name: cognivara-backend
     runtime: python
-    rootDir: backend
+    rootDir: .
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    # Install backend requirements from the monorepo root to avoid build failures
+    buildCommand: pip install -r backend/requirements.txt
+    # Run uvicorn pointing at the backend module when deployed from repo root
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
