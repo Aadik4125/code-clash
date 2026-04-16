@@ -18,6 +18,8 @@ numpy
 scipy
 nltk
 joblib
+scikit-learn
+xgboost
 
 # Optional / tooling
 dvc

@@ -18,7 +18,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import classification_report, confusion_matrix, mean_absolute_error
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, mean_absolute_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -42,15 +42,36 @@ def build_feature_matrices(df: pd.DataFrame):
     X_text = vectorizer.fit_transform(texts)
 
     numeric_feature_names = [
-        'mfcc_variability_mean',
-        'rms_mean',
-        'zcr_mean',
+        'mfcc_variance_avg',
+        'pitch_mean',
+        'pitch_var',
+        'pitch_range',
+        'voiced_fraction',
+        'jitter_local',
+        'shimmer_local',
         'spectral_centroid_mean',
-        'harmonic_ratio',
-        'tempo',
+        'spectral_centroid_var',
+        'energy_mean',
+        'energy_var',
         'duration_sec',
-        'speech_rate_estimate',
+        'speech_rate',
+        'response_latency',
+        'rhythm_consistency',
+        'pause_variability',
+        'speed_variability',
+        'mean_pause_duration',
+        'max_pause_duration',
+        'pause_count',
+        'speech_ratio',
+        'speech_duration_sec',
+        'speech_segment_count',
+        'sentence_length_mean',
         'lexical_diversity',
+        'avg_word_length',
+        'filler_ratio',
+        'content_word_ratio',
+        'syntactic_complexity',
+        'vocabulary_richness',
         # engineered
         'sentiment_compound',
         'negative_ratio',
@@ -101,6 +122,10 @@ def train_models(df: pd.DataFrame, out_dir: str = 'tools') -> None:
 
     X, X_text, X_num_scaled, vectorizer, scaler = build_feature_matrices(df)
 
+    df_with_labels = df.copy()
+    df_with_labels['label'] = y_cls
+    df_with_labels.to_csv(os.path.join(out_dir, 'training_data_with_labels.csv'), index=False)
+
     # encode class labels for XGBoost which expects numeric classes
     le = LabelEncoder()
     y_cls_enc = le.fit_transform(y_cls)
@@ -130,11 +155,15 @@ def train_models(df: pd.DataFrame, out_dir: str = 'tools') -> None:
     # convert back to original label strings for reporting
     y_pred = le.inverse_transform(y_pred_enc)
     y_test_labels = le.inverse_transform(y_test_cls_enc)
+    cls_accuracy = accuracy_score(y_test_labels, y_pred)
+    cls_report_dict = classification_report(y_test_labels, y_pred, digits=4, output_dict=True)
+    cls_confusion = confusion_matrix(y_test_labels, y_pred, labels=['low', 'medium', 'high'])
 
     print('=== XGBoost / Classifier Report ===')
     print(classification_report(y_test_labels, y_pred, digits=4))
+    print(f'Accuracy: {cls_accuracy:.4f}')
     print('Confusion matrix:')
-    print(confusion_matrix(y_test_labels, y_pred, labels=['low', 'medium', 'high']))
+    print(cls_confusion)
 
     # Train XGBoost regressor on same split
     if XGBRegressor is not None:
@@ -147,8 +176,10 @@ def train_models(df: pd.DataFrame, out_dir: str = 'tools') -> None:
     reg.fit(X_train, y_reg_train)
     y_reg_pred = reg.predict(X_test)
     mae = mean_absolute_error(y_reg_test, y_reg_pred)
+    r2 = r2_score(y_reg_test, y_reg_pred)
     print('=== XGBoost / Regressor Report ===')
     print(f'Test Set MAE: {mae:.4f}')
+    print(f'Test Set R2: {r2:.4f}')
 
     # Refit on full dataset for production artifacts
     print("\nRefitting on full dataset for production artifacts...")
@@ -165,6 +196,20 @@ def train_models(df: pd.DataFrame, out_dir: str = 'tools') -> None:
 
     with open(os.path.join(out_dir, 'label_bins_xgb.json'), 'w', encoding='utf-8') as f:
         json.dump(bins, f, ensure_ascii=False, indent=2)
+
+    metrics = {
+        'dataset_rows': int(len(df)),
+        'test_rows': int(len(y_test_labels)),
+        'classification_accuracy': float(cls_accuracy),
+        'classification_report': cls_report_dict,
+        'confusion_matrix_labels': ['low', 'medium', 'high'],
+        'confusion_matrix': cls_confusion.tolist(),
+        'regression_mae': float(mae),
+        'regression_r2': float(r2),
+        'label_bins': bins,
+    }
+    with open(os.path.join(out_dir, 'xgb_metrics.json'), 'w', encoding='utf-8') as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
 
     print('\nSaved XGBoost artifacts to:', os.path.abspath(out_dir))
 

@@ -156,6 +156,9 @@ def list_sessions(db: DBSession = Depends(get_db)):
                 'session_number': s.session_number,
                 'transcript': s.transcript,
                 'csi_score': s.csi_score,
+                'acoustic_features': s.acoustic_features or {},
+                'temporal_features': s.temporal_features or {},
+                'linguistic_features': s.linguistic_features or {},
                 'created_at': s.created_at.isoformat() if s.created_at else None,
             }
             for s in sessions

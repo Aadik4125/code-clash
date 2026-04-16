@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from typing import Tuple
+from urllib.request import urlopen
 
 import joblib
 import numpy as np
@@ -27,7 +28,53 @@ from scipy import sparse
 from tools.feature_engineering import compute_text_features
 
 
+def _json_or_empty(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _sessions_to_dataframe(rows: list[dict]) -> pd.DataFrame:
+    data = []
+    for r in rows:
+        if r.get('csi_score') is None:
+            continue
+        data.append({
+            'session_id': int(r.get('session_id') or r.get('id')),
+            'user_id': int(r.get('user_id') or 0),
+            'session_number': int(r.get('session_number') or 0),
+            'transcript': r.get('transcript') or '',
+            'csi_score': int(r.get('csi_score')),
+            'acoustic_features': _json_or_empty(r.get('acoustic_features')),
+            'temporal_features': _json_or_empty(r.get('temporal_features')),
+            'linguistic_features': _json_or_empty(r.get('linguistic_features')),
+        })
+    return pd.DataFrame(data)
+
+
+def load_sessions_from_api(api_url: str) -> pd.DataFrame:
+    url = api_url.rstrip('/')
+    if not url.endswith('/api/sessions'):
+        url = f'{url}/api/sessions'
+
+    with urlopen(url, timeout=30) as response:
+        payload = json.loads(response.read().decode('utf-8'))
+
+    sessions = payload.get('sessions', payload if isinstance(payload, list) else [])
+    return _sessions_to_dataframe(sessions)
+
+
 def load_sessions_from_db() -> pd.DataFrame:
+    api_url = os.getenv('COGNIVARA_SESSIONS_API', '').strip()
+    if api_url:
+        return load_sessions_from_api(api_url)
+
     BACKEND_DIR = os.path.join(os.getcwd(), 'backend')
     if BACKEND_DIR not in sys.path:
         sys.path.insert(0, BACKEND_DIR)
@@ -41,9 +88,8 @@ def load_sessions_from_db() -> pd.DataFrame:
     finally:
         db.close()
 
-    data = []
-    for r in rows:
-        data.append({
+    data = [
+        {
             'session_id': int(r.id),
             'user_id': int(r.user_id),
             'session_number': int(r.session_number),
@@ -52,8 +98,10 @@ def load_sessions_from_db() -> pd.DataFrame:
             'acoustic_features': r.acoustic_features or {},
             'temporal_features': r.temporal_features or {},
             'linguistic_features': r.linguistic_features or {},
-        })
-    return pd.DataFrame(data)
+        }
+        for r in rows
+    ]
+    return _sessions_to_dataframe(data)
 
 
 def map_scores_to_labels(scores: np.ndarray) -> Tuple[np.ndarray, dict]:
@@ -85,15 +133,36 @@ def build_and_train(df: pd.DataFrame, out_dir: str = 'tools') -> None:
 
     # Build numeric feature matrix from stored JSON features (acoustic/temporal/linguistic)
     numeric_feature_names = [
-        'mfcc_variability_mean',
-        'rms_mean',
-        'zcr_mean',
+        'mfcc_variance_avg',
+        'pitch_mean',
+        'pitch_var',
+        'pitch_range',
+        'voiced_fraction',
+        'jitter_local',
+        'shimmer_local',
         'spectral_centroid_mean',
-        'harmonic_ratio',
-        'tempo',
+        'spectral_centroid_var',
+        'energy_mean',
+        'energy_var',
         'duration_sec',
-        'speech_rate_estimate',
+        'speech_rate',
+        'response_latency',
+        'rhythm_consistency',
+        'pause_variability',
+        'speed_variability',
+        'mean_pause_duration',
+        'max_pause_duration',
+        'pause_count',
+        'speech_ratio',
+        'speech_duration_sec',
+        'speech_segment_count',
+        'sentence_length_mean',
         'lexical_diversity',
+        'avg_word_length',
+        'filler_ratio',
+        'content_word_ratio',
+        'syntactic_complexity',
+        'vocabulary_richness',
         # engineered text features
         'sentiment_compound',
         'negative_ratio',
