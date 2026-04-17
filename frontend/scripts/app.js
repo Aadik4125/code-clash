@@ -328,8 +328,20 @@
         'your', 'about', 'just', 'really', 'today'
       ]);
       const filler = new Set(['um', 'uh', 'like', 'actually', 'basically', 'well', 'right', 'you', 'know']);
-      const negative = new Set(['sad', 'angry', 'upset', 'worried', 'stress', 'stressed', 'tired', 'confused', 'hard', 'difficult', 'bad']);
-      const positive = new Set(['happy', 'good', 'great', 'calm', 'fine', 'better', 'excited', 'relaxed', 'nice', 'easy']);
+      const negative = new Set([
+        'sad', 'angry', 'upset', 'worried', 'worry', 'stress', 'stressed', 'stressful',
+        'tired', 'exhausted', 'drained', 'fatigued', 'confused', 'hard', 'difficult',
+        'bad', 'terrible', 'awful', 'anxious', 'anxiety', 'panic', 'scared', 'afraid',
+        'low', 'down', 'depressed', 'hopeless', 'overwhelmed', 'frustrated', 'irritated',
+        'nervous', 'unwell', 'sick', 'pain', 'pressure', 'struggle', 'struggling'
+      ]);
+      const positive = new Set([
+        'happy', 'good', 'great', 'calm', 'fine', 'better', 'excited', 'relaxed',
+        'nice', 'easy', 'okay', 'ok', 'well', 'focused', 'stable', 'confident',
+        'peaceful', 'positive', 'energetic', 'rested'
+      ]);
+      const negators = new Set(['not', "n't", 'no', 'never', 'hardly', 'barely', 'without']);
+      const intensifiers = new Set(['very', 'really', 'so', 'too', 'extremely', 'quite', 'still']);
 
       const fillerCount = words.filter(w => filler.has(w)).length;
       const repeatCount = words.slice(1).reduce((n, w, i) => n + (w === words[i] ? 1 : 0), 0);
@@ -345,8 +357,29 @@
         .map(([word]) => word);
       const firstSentence = sentences[0] || raw;
       const quote = firstSentence.length > 120 ? `${firstSentence.slice(0, 117)}...` : firstSentence;
-      const positiveCount = words.filter(w => positive.has(w)).length;
-      const negativeCount = words.filter(w => negative.has(w)).length;
+      let positiveScore = 0;
+      let negativeScore = 0;
+      words.forEach((word, idx) => {
+        const windowStart = Math.max(0, idx - 3);
+        const context = words.slice(windowStart, idx);
+        const isNegated = context.some(w => negators.has(w));
+        const intensity = context.some(w => intensifiers.has(w)) ? 1.35 : 1;
+        if (negative.has(word)) {
+          if (isNegated) positiveScore += 0.75 * intensity;
+          else negativeScore += 1 * intensity;
+        }
+        if (positive.has(word)) {
+          if (isNegated) negativeScore += 1 * intensity;
+          else positiveScore += 1 * intensity;
+        }
+      });
+      const sentimentBalance = positiveScore - negativeScore;
+      const toneRisk = clampScore(
+        38 +
+        negativeScore * 16 -
+        positiveScore * 7 +
+        Math.max(0, 10 - words.length) * 0.8
+      );
 
       return {
         raw,
@@ -361,8 +394,45 @@
         repeatCount,
         keywords,
         quote,
-        tone: positiveCount > negativeCount ? 'positive' : negativeCount > positiveCount ? 'strained' : 'neutral',
+        positiveScore: Number(positiveScore.toFixed(2)),
+        negativeScore: Number(negativeScore.toFixed(2)),
+        sentimentBalance: Number(sentimentBalance.toFixed(2)),
+        toneRisk,
+        tone: negativeScore > 0 && negativeScore >= positiveScore
+          ? 'strained'
+          : positiveScore >= negativeScore + 1
+            ? 'positive'
+            : 'neutral',
       };
+    }
+
+    function transcriptToneRisk(text) {
+      if (isPlaceholderTranscript(text)) return { risk: null, tone: 'unknown', confidence: 0 };
+      const stats = spokenContentStats(text);
+      const confidence = Math.max(0.25, Math.min(1, stats.wordCount / 24));
+      return {
+        risk: stats.toneRisk,
+        tone: stats.tone,
+        confidence,
+        negativeScore: stats.negativeScore,
+        positiveScore: stats.positiveScore,
+      };
+    }
+
+    function blendRiskWithTranscript(baseRisk, transcriptText) {
+      const base = clampScore(baseRisk);
+      const tone = transcriptToneRisk(transcriptText);
+      if (tone.risk === null || tone.confidence <= 0) return base;
+      const weight = Math.max(0.30, Math.min(0.60, 0.30 + tone.confidence * 0.25));
+      const blended = Math.round(base * (1 - weight) + tone.risk * weight);
+      if (tone.tone === 'strained') {
+        const floor = tone.risk >= 65 ? 50 : tone.risk >= 45 ? 45 : base;
+        return clampScore(Math.max(base, blended, floor));
+      }
+      if (tone.tone === 'positive' && tone.risk <= 35) {
+        return clampScore(Math.min(base, blended));
+      }
+      return clampScore(Math.max(base, blended));
     }
 
     function buildTranscriptGroundedInsight(sessionId, text, scores = {}, sourceLabel = 'analysis') {
@@ -494,7 +564,8 @@
             const local = localHeuristicAnalysis(
               analysisTranscripts.find(t => Number(t.session) === id)?.text || ''
             );
-            const risk = soberizeScore(local.risk, 0.28);
+            const transcriptText = getTranscriptForSession(analysisTranscripts, id);
+            const risk = blendRiskWithTranscript(soberizeScore(local.risk, 0.28), transcriptText);
             return {
               session: id,
               emo: local.emo,
@@ -505,7 +576,7 @@
               risk,
               insight: buildTranscriptGroundedInsight(
                 id,
-                getTranscriptForSession(analysisTranscripts, id),
+                transcriptText,
                 { ...local, csi: clampScore(100 - risk), risk },
                 'partial upload fallback'
               )
@@ -517,7 +588,9 @@
 
           // Backend-driven risk: inverse CSI is the primary signal; drift adds
           // limited extra concern without overpowering the stability score.
+          const transcriptText = getTranscriptForSession(analysisTranscripts, id);
           let risk = riskFromCsi(csiRaw, driftNorm, { driftWeight: 0.12, pull: 0.10 });
+          risk = blendRiskWithTranscript(risk, transcriptText);
 
           // Prevent abrupt visual jumps between consecutive sessions.
           if (prevRisk !== null) {
@@ -541,7 +614,7 @@
             risk,
             insight: buildTranscriptGroundedInsight(
               id,
-              getTranscriptForSession(analysisTranscripts, id),
+              transcriptText,
               { emo, cog, hes, lin, csi: csiRaw, risk },
               'backend CSI and drift analysis'
             )
@@ -580,7 +653,10 @@
           const fallbackCsi = clampScore(jd?.latest_csi ?? 50);
           const csiArrRaw = csi.length ? csi : [fallbackCsi];
           const csiArr = csiArrRaw.slice(-Math.max(1, expectedSessions));
-          const riskArr = csiArr.map(v => riskFromCsi(v, 0, { driftWeight: 0, pull: 0.10 }));
+          const riskArr = csiArr.map((v, i) => blendRiskWithTranscript(
+            riskFromCsi(v, 0, { driftWeight: 0, pull: 0.10 }),
+            analysisTranscripts[i]?.text || ''
+          ));
           const emoArr = riskArr.map(v => clampScore(v * 0.72 + 14));
           const cogArr = csiArr.slice();
           const hesArr = riskArr.map(v => clampScore(v * 0.78 + 10));

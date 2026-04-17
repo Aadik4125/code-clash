@@ -43,11 +43,57 @@ def _fast_linguistic_fallback(text: str) -> dict[str, float]:
     word_count = len(words)
     unique_count = len(set(words))
     filler_set = {'um', 'uh', 'like', 'actually', 'basically', 'so', 'well', 'right'}
+    negative_set = {
+        'sad', 'angry', 'upset', 'worried', 'worry', 'stress', 'stressed', 'stressful',
+        'tired', 'exhausted', 'drained', 'fatigued', 'confused', 'hard', 'difficult',
+        'bad', 'terrible', 'awful', 'anxious', 'anxiety', 'panic', 'scared', 'afraid',
+        'low', 'down', 'depressed', 'hopeless', 'overwhelmed', 'frustrated', 'irritated',
+        'nervous', 'unwell', 'sick', 'pain', 'pressure', 'struggle', 'struggling',
+    }
+    positive_set = {
+        'happy', 'good', 'great', 'calm', 'fine', 'better', 'excited', 'relaxed',
+        'nice', 'easy', 'okay', 'ok', 'well', 'focused', 'stable', 'confident',
+        'peaceful', 'positive', 'energetic', 'rested',
+    }
+    negators = {'not', "n't", 'no', 'never', 'hardly', 'barely', 'without'}
+    intensifiers = {'very', 'really', 'so', 'too', 'extremely', 'quite', 'still'}
     filler_count = sum(1 for w in words if w in filler_set)
     lexical_diversity = (unique_count / word_count) if word_count else 0.0
     filler_ratio = (filler_count / word_count) if word_count else 0.0
     sentence_count = max(1, text.count('.') + text.count('!') + text.count('?')) if text else 0
     sentence_length_mean = (word_count / sentence_count) if sentence_count else 0.0
+
+    positive_score = 0.0
+    negative_score = 0.0
+    for idx, word in enumerate(words):
+        context = words[max(0, idx - 3):idx]
+        is_negated = any(w in negators for w in context)
+        intensity = 1.35 if any(w in intensifiers for w in context) else 1.0
+        if word in negative_set:
+            if is_negated:
+                positive_score += 0.75 * intensity
+            else:
+                negative_score += 1.0 * intensity
+        if word in positive_set:
+            if is_negated:
+                negative_score += 1.0 * intensity
+            else:
+                positive_score += 1.0 * intensity
+
+    tone_risk = max(
+        0.0,
+        min(
+            100.0,
+            38.0 + (negative_score * 16.0) - (positive_score * 7.0) + (max(0, 10 - word_count) * 0.8),
+        ),
+    )
+    if negative_score > 0 and negative_score >= positive_score:
+        tone_label = 'strained'
+    elif positive_score >= negative_score + 1:
+        tone_label = 'positive'
+    else:
+        tone_label = 'neutral'
+
     return {
         'sentence_length_mean': round(float(sentence_length_mean), 4),
         'lexical_diversity': round(float(lexical_diversity), 4),
@@ -58,6 +104,11 @@ def _fast_linguistic_fallback(text: str) -> dict[str, float]:
         'vocabulary_richness': round(float((word_count ** (unique_count ** -0.172)) if unique_count > 0 else 0.0), 4),
         'word_count': word_count,
         'sentence_count': sentence_count,
+        'positive_word_score': round(float(positive_score), 4),
+        'negative_word_score': round(float(negative_score), 4),
+        'sentiment_balance': round(float(positive_score - negative_score), 4),
+        'tone_risk': round(float(tone_risk), 4),
+        'tone_label': tone_label,
     }
 
 
